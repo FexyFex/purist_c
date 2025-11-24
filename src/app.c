@@ -55,12 +55,12 @@ void log(char* message) {
 			case WM_PAINT: {
 				PAINTSTRUCT paint;
 				HDC device_context = BeginPaint(window, &paint);
-				PatBlt(
-					device_context, 
-					paint.rcPaint.left, paint.rcPaint.top, 
-					paint.rcPaint.right - paint.rcPaint.left, paint.rcPaint.bottom - paint.rcPaint.top,
-					BLACKNESS
-				);
+				//PatBlt(
+				//	device_context, 
+				//	paint.rcPaint.left, paint.rcPaint.top, 
+				//	paint.rcPaint.right - paint.rcPaint.left, paint.rcPaint.bottom - paint.rcPaint.top,
+				//	BLACKNESS
+				//);
 				EndPaint(window, &paint);
 				break;
 			}
@@ -206,7 +206,8 @@ void vulkan_create_swapchain() {
 			continue; // Keep looking for the better option
 		}
 
-		swapchain_ci.presentMode = present_mode_candidate; // This is defeat; we settle for less... maybe...
+		// This is defeat; we settle for less, but all hope may not yet be lost
+		swapchain_ci.presentMode = present_mode_candidate; 
 	}
 
 	swapchain_ci.clipped = 0;
@@ -258,7 +259,7 @@ void vulkan_create_sync_objects() {
 	fences = (VkFence*) malloc(sizeof(VkFence) * buffer_strategy);
 	for (uint32_t i = 0; i < buffer_strategy; i++) {
 		VkSemaphoreCreateInfo semaphore_ci = { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, NULL, 0 };
-		VkFenceCreateInfo fence_ci = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, 0 };
+		VkFenceCreateInfo fence_ci = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, NULL, VK_FENCE_CREATE_SIGNALED_BIT };
 
 		vkCreateSemaphore(device, &semaphore_ci, NULL, available_semaphores + i);
 		vkCreateSemaphore(device, &semaphore_ci, NULL, finished_semaphores + i);
@@ -487,6 +488,25 @@ void vulkan_init() {
 	}
 }
 
+void vulkan_recreate_swapchain() {
+	for (uint32_t i = 0; i < buffer_strategy; i++) {
+		vkDestroyFence(device, fences[i], NULL);
+		vkDestroySemaphore(device, available_semaphores[i], NULL);
+		vkDestroySemaphore(device, finished_semaphores[i], NULL);
+		vkDestroyImageView(device, swapchain_image_views[i], NULL);
+	}
+	vkDestroySwapchainKHR(device, swapchain, NULL);
+	free(fences);
+	free(available_semaphores);
+	free(finished_semaphores);
+	free(swapchain_image_views);
+	free(swapchain_images);
+
+	vulkan_create_swapchain();
+	vulkan_create_command_buffers();
+	vulkan_create_sync_objects();
+}
+
 void process_frame() {
 	uint64_t uint64_max = 0xFFFFFFFFFFFFFFFF;
 
@@ -503,6 +523,12 @@ void process_frame() {
 		NULL,
 		&image_index
 	);
+
+	if (result_acquire == VK_ERROR_OUT_OF_DATE_KHR || result_acquire == VK_SUBOPTIMAL_KHR) {
+		vkDeviceWaitIdle(device);
+		vulkan_recreate_swapchain();
+		return;
+	}
 
 	VkImage swapchain_image = swapchain_images[image_index];
 	VkImageView swapchain_image_view = swapchain_image_views[image_index];
@@ -529,7 +555,7 @@ void process_frame() {
 			1, &img_barrier
 		);
 
-		VkClearColorValue clear_color = { 0.5f };
+		VkClearColorValue clear_color = { 0.1f, 0.1f, 0.1f, 1.0f };
 		VkImageSubresourceRange subresource_range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 		vkCmdClearColorImage(
 			command_buffer,
@@ -578,13 +604,11 @@ void process_frame() {
 void begin_loop() {
 	while (!close_requested) {
 		MSG msg;
-		BOOL status = GetMessage(&msg, 0, 0, 0);
-		if (status > 0) { 
+		while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {			
 			TranslateMessage(&msg);
 			DispatchMessage(&msg);
-
-			process_frame();
-		} else break;
+		}
+		process_frame();
 	}
 
 	DestroyWindow(hwnd);
