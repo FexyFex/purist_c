@@ -64,5 +64,7 @@ echo ===END: COMPILING SOURCE CODE===
 echo.
 
 echo ===PROGRAM START===
+echo on
 "main.exe"
+@echo off
 echo ===PROGRAM ENDED===
