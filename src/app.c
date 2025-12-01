@@ -8,6 +8,8 @@
 
 #include "vulkan.h"
 
+#include "sprite_vert.h"
+
 
 // Make sure all the direcories are in place
 void setup_directories() {
