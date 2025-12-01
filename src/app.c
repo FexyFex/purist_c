@@ -29,7 +29,7 @@ void log(char* message) {
 	#include "vulkan_win32.h"
 
 	HWND hwnd = 0;
-	uint8_t close_requested = 0;
+	uint8_t quit_to_desktop_requested = 0;
 
 	LRESULT CALLBACK window_callback(HWND window, UINT message_type, WPARAM w_param, LPARAM l_param) {
 		LRESULT result = 0;
@@ -45,7 +45,7 @@ void log(char* message) {
 			}
 			case WM_CLOSE: {
 				printf("WM_CLOSE\n");
-				close_requested = 1;
+				quit_to_desktop_requested = 1;
 				break;
 			}
 			case WM_ACTIVATEAPP: {
@@ -602,7 +602,7 @@ void process_frame() {
 }
 
 void begin_loop() {
-	while (!close_requested) {
+	while (!quit_to_desktop_requested) {
 		MSG msg;
 		while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {			
 			TranslateMessage(&msg);
