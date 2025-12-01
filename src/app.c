@@ -116,7 +116,6 @@ VkInstance instance;
 VkPhysicalDevice physical_device;
 VkDevice device;
 VkSurfaceKHR surface;
-VkSwapchainKHR swapchain;
 
 typedef struct GPUInfo {
 	uint8_t has_dedicated_transfer;
@@ -129,6 +128,9 @@ VkCommandPool command_pool_transient;
 VkQueue graphics_queue;
 
 uint32_t buffer_strategy;
+uint32_t swapchain_width;
+uint32_t swapchain_height;
+VkSwapchainKHR swapchain;
 VkImage* swapchain_images;
 VkImageView* swapchain_image_views;
 VkCommandPool command_pool;
@@ -178,11 +180,20 @@ void vulkan_create_swapchain() {
 		VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR, NULL, 0
 	};
 
+	window_get_size(&swapchain_ci.imageExtent.width, &swapchain_ci.imageExtent.height);
+	swapchain_width = swapchain_ci.imageExtent.width;
+	swapchain_height = swapchain_ci.imageExtent.height;
+	if (swapchain_ci.imageExtent.width <= 0 || swapchain_ci.imageExtent.height <= 0) {
+		// Do not create swapchain with width * height <= 0
+		free(surface_formats);
+		free(surface_present_modes);
+		return;
+	}
+
 	swapchain_ci.surface = surface;
 	swapchain_ci.minImageCount = min(max(surface_caps.minImageCount, 2), surface_caps.maxImageCount); // want double buffering
 	swapchain_ci.imageFormat = VK_FORMAT_R8G8B8A8_SRGB; // TODO: check for compatibility
 	swapchain_ci.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR; // check for compatibility
-	window_get_size(&swapchain_ci.imageExtent.width, &swapchain_ci.imageExtent.height);
 	swapchain_ci.imageArrayLayers = 1;
 	swapchain_ci.imageUsage = 	VK_IMAGE_USAGE_TRANSFER_DST_BIT | 
 								VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
@@ -490,7 +501,15 @@ void vulkan_init() {
 	}
 }
 
-void vulkan_recreate_swapchain() {
+void vulkan_create_present_objects() {
+	vulkan_create_swapchain();
+	if (swapchain_width > 0 && swapchain_height > 0) {
+		vulkan_create_command_buffers();
+		vulkan_create_sync_objects();
+	}
+}
+
+void vulkan_destroy_present_objects() {
 	for (uint32_t i = 0; i < buffer_strategy; i++) {
 		vkDestroyFence(device, fences[i], NULL);
 		vkDestroySemaphore(device, available_semaphores[i], NULL);
@@ -503,13 +522,26 @@ void vulkan_recreate_swapchain() {
 	free(finished_semaphores);
 	free(swapchain_image_views);
 	free(swapchain_images);
-
-	vulkan_create_swapchain();
-	vulkan_create_command_buffers();
-	vulkan_create_sync_objects();
 }
 
-void process_frame() {
+void vulkan_recreate_present_objects() {
+	vulkan_destroy_present_objects();
+	vulkan_create_present_objects();
+}
+
+void draw_frame() {
+	// Do not draw when swapchain is 0 in one dimension
+	if (swapchain_width <= 0 || swapchain_height <= 0) {
+		// Check if window size changed
+		uint32_t width, height;
+		window_get_size(&width, &height);
+		if (width > 0 && height > 0) {
+			// Don't recreate, just create since everything will have been destroyed already
+			vulkan_create_present_objects();
+		}
+		return;
+	}
+
 	uint64_t uint64_max = 0xFFFFFFFFFFFFFFFF;
 
 	vkWaitForFences(device, 1, fences + current_frame, VK_TRUE, uint64_max);
@@ -528,7 +560,7 @@ void process_frame() {
 
 	if (result_acquire == VK_ERROR_OUT_OF_DATE_KHR || result_acquire == VK_SUBOPTIMAL_KHR) {
 		vkDeviceWaitIdle(device);
-		vulkan_recreate_swapchain();
+		vulkan_recreate_present_objects();
 		return;
 	}
 
@@ -598,7 +630,13 @@ void process_frame() {
 		&image_index,
 		NULL
 	};
-	vkQueuePresentKHR(graphics_queue, &present_info);
+	VkResult result_present = vkQueuePresentKHR(graphics_queue, &present_info);
+
+	if (result_present == VK_ERROR_OUT_OF_DATE_KHR || result_present == VK_SUBOPTIMAL_KHR) {
+		vkDeviceWaitIdle(device);
+		vulkan_recreate_present_objects();
+		return;
+	}
 
 	current_frame = (current_frame + 1) % buffer_strategy;
 }
@@ -610,7 +648,7 @@ void begin_loop() {
 			TranslateMessage(&msg);
 			DispatchMessage(&msg);
 		}
-		process_frame();
+		draw_frame();
 	}
 
 	DestroyWindow(hwnd);
